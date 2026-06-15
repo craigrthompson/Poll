@@ -370,29 +370,34 @@
       }, []);
 
       async function submitBallot() {
-        if (!allAnswered || submitting) return;
-        const uid = auth.currentUser?.uid;
-        if (!uid) {
-          setSubmitError("Authentication not ready — wait a moment and try again.");
-          return;
-        }
-        setSubmitting(true);
-        setSubmitError("");
-        try {
-          // Using doc(uid) means a second submission overwrites rather than duplicates
-          await db.collection(COLLECTION).doc(uid).set({
-            answers,
-            name:    memberName.trim(),
-            comment: comment.trim(),
-            ts:      new Date().toISOString(),
-          });
-          setScreen("done");
-        } catch(e) {
-          setSubmitError("Your ballot could not be recorded. Check your connection and press Submit again.");
-        } finally {
-          setSubmitting(false);
-        }
+  if (!allAnswered || submitting) return;
+  setSubmitting(true);
+  setSubmitError("");
+  try {
+    // Use current user, or try signing in again, or fall back to a random ID
+    let uid = auth.currentUser?.uid;
+    if (!uid) {
+      try {
+        const cred = await auth.signInAnonymously();
+        uid = cred.user.uid;
+      } catch(e) {
+        // Auth unavailable — generate a one-time ID so the poll still works
+        uid = "anon-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
       }
+    }
+    await db.collection(COLLECTION).doc(uid).set({
+      answers,
+      name:    memberName.trim(),
+      comment: comment.trim(),
+      ts:      new Date().toISOString(),
+    });
+    setScreen("done");
+  } catch(e) {
+    setSubmitError("Your ballot could not be recorded. Check your connection and press Submit again.");
+  } finally {
+    setSubmitting(false);
+  }
+}
 
       async function loadResults() {
         setLoadingResults(true);
