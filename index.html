@@ -15,7 +15,7 @@
   <!-- Firebase compat SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-
+ <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; background: #142B1E; }
@@ -25,8 +25,9 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState } = React;
+    const { useState, useEffect } = React;
 
+  
     // ── FIREBASE CONFIG ─────────────────────────────────────────────
     // Replace every REPLACE_WITH_... value with your own project config.
     // Get it from: Firebase Console → Project Settings → Your apps → Web
@@ -40,6 +41,8 @@
 };
     
     firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+ auth.signInAnonymously();       
     const db = firebase.firestore();
     const COLLECTION = "bcc-redwood-votes";
 
@@ -399,29 +402,49 @@
       const [submitError,    setSubmitError]     = useState("");
       const [results,        setResults]         = useState(null);
       const [loadingResults, setLoadingResults]  = useState(false);
+        const [hasVoted,  setHasVoted]  = useState(false);
+const [authReady, setAuthReady] = useState(false);
+
+useEffect(() => {
+  const unsub = auth.onAuthStateChanged(async user => {
+    if (user) {
+      try {
+        const doc = await db.collection(COLLECTION).doc(user.uid).get();
+        if (doc.exists) { setHasVoted(true); setScreen("done"); }
+      } catch(e) { /* if check fails, allow voting */ }
+      setAuthReady(true);
+    }
+  });
+  return () => unsub();
+}, []);
+
 
       const allAnswered = QUESTIONS.every(q => answers[q.id]);
 
       async function submitBallot() {
-        if (!allAnswered || submitting) return;
-        setSubmitting(true);
-        setSubmitError("");
-        try {
-          await db.collection(COLLECTION).add({
-            answers,
-            name:    memberName.trim(),
-            comment: comment.trim(),
-            ts:      new Date().toISOString(),
-          });
-          setScreen("done");
-        } catch (e) {
-          setSubmitError(
-            "Your ballot could not be recorded. Check your connection and press Submit again."
-          );
-        } finally {
-          setSubmitting(false);
-        }
-      }
+  if (!allAnswered || submitting) return;
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    setSubmitError("Authentication not ready — wait a moment and try again.");
+    return;
+  }
+  setSubmitting(true);
+  setSubmitError("");
+  try {
+    await db.collection(COLLECTION).doc(uid).set({
+      answers,
+      name:    memberName.trim(),
+      comment: comment.trim(),
+      ts:      new Date().toISOString(),
+    });
+    setHasVoted(true);
+    setScreen("done");
+  } catch(e) {
+    setSubmitError("Your ballot could not be recorded. Check your connection and press Submit again.");
+  } finally {
+    setSubmitting(false);
+  }
+}
 
       async function loadResults() {
         setLoadingResults(true);
@@ -465,6 +488,12 @@
           </header>
 
           <main style={S.card}>
+                {!authReady ? (
+    <div style={{ textAlign:"center", padding:"40px 0" }}>
+      <div className="spinner" />
+    </div>
+  ) : (
+    <>
             {screen === "intro" && (
               <Intro onVote={() => setScreen("ballot")} onResults={loadResults} />
             )}
@@ -497,6 +526,8 @@
                 onRefresh={loadResults} onBack={() => setScreen("intro")}
               />
             )}
+      </>
+  )}
           </main>
 
           <footer style={S.footer}>
